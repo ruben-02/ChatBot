@@ -1,0 +1,199 @@
+<?php
+require "auth.php";
+check_login();
+$backendUrl = "http://localhost:8080";
+$username = $_SESSION['username'];
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chatbot Dashboard</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<style>
+body { padding:20px; }
+#chat-box { height:300px; overflow-y:auto; border:1px solid #ccc; padding:10px; border-radius:8px; }
+.msg-user { text-align:right; color:blue; margin:5px; }
+.msg-bot { text-align:left; color:green; margin:5px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Welcome, <?php echo htmlspecialchars($_SESSION['fullname']); ?>!</h1>
+    <a href="logout.php" class="btn btn-danger">Logout</a>
+  </div>
+
+  <p class="text-muted">Manage connectors and chat with your datasource.</p>
+
+  <!-- Connector Setup -->
+  <div class="card p-4 mb-4">
+    <h4>Connector Setup</h4>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Datasource</label>
+        <select id="datasource" class="form-select"><option value="">--Select--</option></select>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Subproduct</label>
+        <select id="subproduct" class="form-select"><option value="">--Select--</option></select>
+      </div>
+    </div>
+    <label class="form-label">Config (JSON)</label>
+    <textarea id="config" class="form-control mb-3" rows="3" placeholder='{"access_token":"..."}'></textarea>
+    <input id="connector_id" class="form-control mb-3" placeholder="Connector ID">
+    <button id="btnConnect" class="btn btn-primary">Save Connector</button>
+    <button id="btnTest" class="btn btn-outline-secondary">Test Connection</button>
+  </div>
+
+  <!-- Saved Connectors -->
+  <div class="card p-4 mb-4">
+    <h4>Saved Connectors</h4>
+    <ul id="saved-connectors" class="list-group"></ul>
+  </div>
+
+  <!-- Chat Section -->
+  <div class="card p-4">
+    <h4>Chat</h4>
+    <div id="chat-box"></div>
+    <div class="input-group mt-2">
+      <input id="message" class="form-control" placeholder="Ask something...">
+      <button id="btnSend" class="btn btn-success">Send</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let backend = "<?php echo $backendUrl; ?>";
+let currentConnector = null;
+let currentChatbotId = null;
+let username = "<?php echo $username; ?>";
+
+$(function() {
+
+  // 1️⃣ Load datasources
+  $.get(backend + "/datasources")
+    .done(function(data){
+      $("#datasource").empty().append('<option value="">--Select--</option>');
+      for(const [key,val] of Object.entries(data)){
+        $("#datasource").append('<option value="'+key+'">'+val.label+'</option>');
+      }
+    });
+
+  // 2️⃣ Populate subproducts when datasource changes
+  $("#datasource").on("change", function() {
+    let ds = $(this).val();
+    $("#subproduct").empty().append('<option value="">--Select--</option>');
+    if(!ds) return;
+    $.get(backend + "/datasources", function(data){
+      let subs = data[ds].subproducts;
+      subs.forEach(sp => $("#subproduct").append('<option value="'+sp+'">'+sp+'</option>'));
+    });
+  });
+
+  // 3️⃣ Load existing chatbots & connectors
+  function loadSavedConnectors(){
+    $("#saved-connectors").empty();
+    $.get(backend + "/list_chatbots/" + username)
+      .done(function(data){
+        data.forEach(bot => {
+          currentChatbotId = bot.id; // default to last one
+          currentConnector = bot.connector_id; // default connector
+          $("#saved-connectors").append('<li class="list-group-item">'+
+            'Chatbot: '+bot.chatbot_name+' | Connector: '+bot.connector_id+
+            ' <button class="btn btn-sm btn-primary float-end select-connector" data-id="'+bot.connector_id+'">Use</button></li>');
+        });
+      });
+  }
+  loadSavedConnectors();
+
+  // Select saved connector
+  $(document).on("click", ".select-connector", function(){
+    currentConnector = $(this).data("id");
+    currentChatbotId = "bot-"+currentConnector;
+    alert("Selected connector: " + currentConnector);
+  });
+
+  // 4️⃣ Save connector and chatbot
+  $("#btnConnect").click(function(){
+    let connectorId = $("#connector_id").val().trim();
+    let datasource = $("#datasource").val();
+    let subproduct = $("#subproduct").val();
+    if(!connectorId || !datasource || !subproduct) return alert("Fill all fields!");
+
+    let config = {};
+    try { config = JSON.parse($("#config").val()); } catch(e){ return alert("Invalid JSON"); }
+
+    $.ajax({
+      url: backend+"/connect",
+      type:"POST",
+      contentType:"application/json",
+      data: JSON.stringify({
+        connector_id: connectorId,
+        username: username,
+        datasource: datasource,
+        subproduct: subproduct,
+        config: config
+      }),
+      success:function(res){
+        alert("Connector saved!");
+        currentConnector = connectorId;
+
+        // Save chatbot automatically
+        $.ajax({
+          url: backend+"/save_chatbot",
+          type:"POST",
+          contentType:"application/json",
+          data: JSON.stringify({
+            id: "bot-"+connectorId,
+            username: username,
+            chatbot_name: "MyBot",
+            gemini_api_key: "AIzaSyB7MrpFiMoRM9O7S9DNS1gBCUWfxa0PMe4",
+            connector_id: connectorId
+          }),
+          success:function(res){
+            currentChatbotId = res.chatbot_id || "bot-"+connectorId;
+            alert("Chatbot created and ready to chat!");
+            loadSavedConnectors(); // refresh saved connectors list
+          }
+        });
+      }
+    });
+  });
+
+  // 5️⃣ Test connection
+  $("#btnTest").click(function(){
+    if(!currentConnector) return alert("Save connector first!");
+    $.get(backend+"/test_connection/"+currentConnector)
+      .done(function(res){ alert("Connection result: "+JSON.stringify(res).substring(0,200)); });
+  });
+
+  // 6️⃣ Chat functionality
+  $("#btnSend").click(function(){
+    let msg = $("#message").val().trim();
+    if(!msg) return alert("Enter a message!");
+    if(!currentChatbotId) return alert("Save connector first!");
+
+    $("#chat-box").append('<div class="msg-user">You: '+msg+'</div>');
+    $("#message").val("");
+
+    $.ajax({
+      url: backend+"/chat",
+      type:"POST",
+      contentType:"application/json",
+      data: JSON.stringify({ chatbot_id: currentChatbotId, message: msg }),
+      success:function(res){
+        $("#chat-box").append('<div class="msg-bot">Bot: '+res.reply+'</div>');
+        $("#chat-box").scrollTop($("#chat-box")[0].scrollHeight);
+      },
+      error:function(){
+        $("#chat-box").append('<div class="msg-bot text-danger">Error connecting to bot</div>');
+      }
+    });
+  });
+
+});
+</script>
