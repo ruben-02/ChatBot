@@ -2,7 +2,7 @@
 FROM php:8.1-apache
 
 # Set backend URL environment variable
-ENV BACKEND_URL=http://backend:5000
+ENV BACKEND_URL=https://chatbot-sb0u.onrender.com
 
 # Copy the frontend code to Apache's document root
 COPY ../frontend/ /var/www/html/
