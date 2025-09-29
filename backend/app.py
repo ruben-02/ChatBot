@@ -12,7 +12,7 @@ APP_HOST = "0.0.0.0"
 APP_PORT = int(os.environ.get("PORT", 5000))
 
 app = Flask(__name__)
-CORS(app, origins=["*"], supports_credentials=True)
+CORS(app, origins=["https://chatbot-frontend-hwuf.onrender.com"], supports_credentials=True)
 
 # ---------------- Datasources ----------------
 DATASOURCES = {
