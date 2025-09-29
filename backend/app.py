@@ -9,10 +9,10 @@ from google import genai  # keep as you had
 
 DB_FILE = "chatbots.db"
 APP_HOST = "0.0.0.0"
-APP_PORT = int(os.environ.get("PORT", 8080))
+APP_PORT = int(os.environ.get("PORT", 5000))
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost", "http://localhost:8000"], supports_credentials=True)
+CORS(app, origins=["*"], supports_credentials=True)
 
 # ---------------- Datasources ----------------
 DATASOURCES = {

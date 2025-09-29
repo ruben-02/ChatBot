@@ -4,6 +4,9 @@ FROM python:3.9-slim
 # Set working directory
 WORKDIR /app
 
+# Set port environment variable
+ENV PORT=5000
+
 # Copy requirements and install dependencies
 COPY ../backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -12,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ../backend/ .
 
 # Expose port
-EXPOSE 8080
+EXPOSE 5000
 
 # Run the application
 CMD ["python", "app.py"]
