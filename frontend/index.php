@@ -2,7 +2,8 @@
 require "auth.php";
 check_login();
 // $backendUrl = "http://localhost:8080";
-$backendUrl = getenv('BACKEND_URL') ?: "http://localhost:5000";
+// $backendUrl = getenv('BACKEND_URL') ?: "http://localhost:5000";
+$backendUrl = "https://chatbot-sb0u.onrender.com";
 $username = $_SESSION['username'];
 ?>
 <!DOCTYPE html>
