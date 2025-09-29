@@ -1,7 +1,8 @@
 <?php
 require "auth.php";
 check_login();
-$backendUrl = "http://localhost:8080";
+// $backendUrl = "http://localhost:8080";
+$backendUrl = "https://chatbot-sb0u.onrender.com";
 $username = $_SESSION['username'];
 ?>
 <!DOCTYPE html>
@@ -10,6 +11,7 @@ $username = $_SESSION['username'];
 <meta charset="UTF-8">
 <title>Chatbot Dashboard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <style>
 body { padding:20px; }
@@ -49,20 +51,32 @@ body { padding:20px; }
   </div>
 
   <!-- Saved Connectors -->
-  <div class="card p-4 mb-4">
-    <h4>Saved Connectors</h4>
-    <ul id="saved-connectors" class="list-group"></ul>
+<div class="card p-4 mb-4">
+  <h4>Saved Connectors</h4>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover">
+      <thead>
+        <tr>
+          <th>Chatbot Name</th>
+          <th>Connector ID</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="saved-connectors"></tbody>
+    </table>
   </div>
+</div>
 
-  <!-- Chat Section -->
-  <div class="card p-4">
-    <h4>Chat</h4>
-    <div id="chat-box"></div>
-    <div class="input-group mt-2">
-      <input id="message" class="form-control" placeholder="Ask something...">
-      <button id="btnSend" class="btn btn-success">Send</button>
-    </div>
+<!-- Chat Section -->
+<div class="card p-4">
+  <h4>Chat</h4>
+  <div id="chat-box"></div>
+  <div class="input-group mt-2">
+    <input id="message" class="form-control" placeholder="Ask something...">
+    <button id="btnSend" class="btn btn-success">Send</button>
+    <button id="btnClear" class="btn btn-danger">Clear</button>
   </div>
+</div>
 
 </div>
 
@@ -102,19 +116,40 @@ $(function() {
         data.forEach(bot => {
           currentChatbotId = bot.id; // default to last one
           currentConnector = bot.connector_id; // default connector
-          $("#saved-connectors").append('<li class="list-group-item">'+
-            'Chatbot: '+bot.chatbot_name+' | Connector: '+bot.connector_id+
-            ' <button class="btn btn-sm btn-primary float-end select-connector" data-id="'+bot.connector_id+'">Use</button></li>');
+          $("#saved-connectors").append(`
+            <tr>
+              <td>${bot.chatbot_name}</td>
+              <td>${bot.connector_id}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-primary select-connector" data-id="${bot.connector_id}">
+                  <i class="bi bi-check-circle"></i> Use
+                </button>
+                <button class="btn btn-sm btn-danger delete-connector" data-id="${bot.connector_id}">
+                  <i class="bi bi-trash"></i> Delete
+                </button>
+              </td>
+            </tr>
+          `);
         });
       });
   }
   loadSavedConnectors();
+
+
+
+  
 
   // Select saved connector
   $(document).on("click", ".select-connector", function(){
     currentConnector = $(this).data("id");
     currentChatbotId = "bot-"+currentConnector;
     alert("Selected connector: " + currentConnector);
+  });
+
+  // Delete saved connector
+  $(document).on("click", ".delete-connector", function(){
+    let connectorId = $(this).data("id");
+    alert("Delete for connector " + connectorId + " is not implemented yet.");
   });
 
   // 4️⃣ Save connector and chatbot
@@ -197,3 +232,7 @@ $(function() {
 
 });
 </script>
+
+
+</body>
+</html>

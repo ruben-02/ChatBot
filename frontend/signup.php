@@ -1,6 +1,8 @@
 <?php
 require "auth.php";
-$backendUrl = "http://localhost:8080";
+// $backendUrl = "http://localhost:8080";
+$backendUrl = "https://chatbot-sb0u.onrender.com";
+
 $error = "";
 
 if($_SERVER['REQUEST_METHOD'] === "POST"){
