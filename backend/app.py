@@ -20,7 +20,7 @@ DATASOURCES = {
     "hubspot": {"label": "HubSpot", "subproducts": ["crm_contacts", "crm_deals", "crm_companies"]},
     "freshdesk": {"label": "Freshdesk", "subproducts": ["tickets", "contacts"]},
     "google_sheets": {"label": "Google Sheets", "subproducts": ["sheet"]},
-    "Odoo": {"label": "Odoo", "subproducts": ["crm", "sales", "inventory","Todo",]},
+    "Odoo": {"label": "Odoo", "subproducts": ["crm", "sales", "inventory"]},
 }
 
 # ---------------- Database ----------------
@@ -244,8 +244,7 @@ def fetch_odoo(config, subproduct, domain=None):
         model_map = {
             "crm": "crm.lead",
             "sales": "sale.order",
-            "inventory": "stock.inventory",
-            "Todo": "project.task"
+            "inventory": "stock.quant"
         }
         model = model_map.get(subproduct)
         if not model:
@@ -404,13 +403,53 @@ def chat():
         if connector_info["subproduct"] == "crm":
             odoo_data = fetch_odoo(config, "crm", domain=[])
             if isinstance(odoo_data, list) and len(odoo_data) > 0:
-                # Show as much as fits in prompt (truncate for safety)
                 odoo_text = "\n".join([
                     ", ".join([f"{k}: {v}" for k, v in item.items()])
-                    for item in odoo_data[:40]  # show more pipeline records
+                    for item in odoo_data[:40]
                 ])
                 odoo_text = odoo_text[:3500]
                 enriched_message = f"{user_message}\n\nReference Data: Odoo CRM Pipeline (all stages):\n{odoo_text}"
+            elif isinstance(odoo_data, dict) and "error" in odoo_data:
+                enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
+        # For Inventory, use Gemini to generate a domain filter for stock.quant
+        elif connector_info["subproduct"] == "inventory":
+            domain = []
+            try:
+                filter_prompt = (
+                    "Given the following user request, generate an Odoo domain filter (Python list of lists) "
+                    "for the model 'stock.quant'. Only output the Python list, nothing else.\n"
+                    f"User request: {user_message}"
+                )
+                filter_client = genai.Client(api_key=gemini_api_key)
+                filter_response = filter_client.models.generate_content(model=gemini_model, contents=filter_prompt)
+                filter_text = getattr(filter_response, "text", None) or (filter_response.get("content") if isinstance(filter_response, dict) else str(filter_response))
+                import ast
+                domain = ast.literal_eval(filter_text.strip())
+                if not isinstance(domain, list):
+                    domain = []
+            except Exception as e:
+                domain = []
+
+            odoo_data = fetch_odoo(config, "inventory", domain=domain)
+            if isinstance(odoo_data, list) and len(odoo_data) > 0:
+                odoo_text = "\n".join([
+                    ", ".join([f"{k}: {v}" for k, v in item.items()])
+                    for item in odoo_data[:40]
+                ])
+                odoo_text = odoo_text[:3500]
+                enriched_message = f"{user_message}\n\nReference Data: Odoo Inventory Levels (stock.quant, filtered):\n{odoo_text}"
+            elif isinstance(odoo_data, dict) and "error" in odoo_data:
+                enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
+        # For Sales, fetch all sales orders (sale.order) with no filter, show up to 200 records
+        elif connector_info["subproduct"] == "sales":
+            odoo_data = fetch_odoo(config, "sales", domain=[])
+            if isinstance(odoo_data, list) and len(odoo_data) > 0:
+                odoo_text = "\n".join([
+                    ", ".join([f"{k}: {v}" for k, v in item.items()])
+                    for item in odoo_data[:200]
+                ])
+                odoo_text = odoo_text[:15000]
+                enriched_message = f"{user_message}\n\nReference Data: Odoo Sales Orders (all records, up to 200 shown):\n{odoo_text}"
             elif isinstance(odoo_data, dict) and "error" in odoo_data:
                 enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
         else:

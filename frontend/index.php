@@ -104,7 +104,7 @@ $(function() {
     $("#subproduct").empty().append('<option value="">--Select--</option>');
     if(!ds) return;
     $.get(backend + "/datasources", function(data){
-      let subs = data[ds].subproducts;
+      let subs = data[ds].subproducts.filter(sp => sp !== "Todo");
       subs.forEach(sp => $("#subproduct").append('<option value="'+sp+'">'+sp+'</option>'));
     });
   });
