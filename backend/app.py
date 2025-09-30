@@ -12,7 +12,7 @@ APP_HOST = "0.0.0.0"
 APP_PORT = int(os.environ.get("PORT", 5000))
 
 app = Flask(__name__)
-CORS(app, origins=["https://chatbot-frontend-hwuf.onrender.com"], supports_credentials=True)
+CORS(app, origins=["https://chatbot-frontend-hwuf.onrender.com", "http://localhost:8000"], supports_credentials=True)
 
 # ---------------- Datasources ----------------
 DATASOURCES = {
@@ -218,7 +218,7 @@ def fetch_google_sheets(config, subproduct):
 
 
 
-def fetch_odoo(config, subproduct):
+def fetch_odoo(config, subproduct, domain=None):
     """
     Example config:
     {
@@ -228,6 +228,7 @@ def fetch_odoo(config, subproduct):
         "password": "yourpassword",
         "api_key": "optional_api_key"
     }
+    domain: Odoo domain filter (list of lists), e.g. [["city", "=", "New York"]]
     """
     try:
         base_url = config.get("base_url")
@@ -239,30 +240,65 @@ def fetch_odoo(config, subproduct):
         if not all([base_url, db, username, password]):
             return {"error": "Missing required Odoo connection details (base_url, db, username, password)"}
 
-        # Construct endpoint based on subproduct
-        if subproduct == "crm":
-            endpoint = "/api/crm.lead"
-        elif subproduct == "sales":
-            endpoint = "/api/sale.order"
-        elif subproduct == "inventory":
-            endpoint = "/api/stock.inventory"
-        elif subproduct == "Todo":
-            endpoint = "/api/project.task"
-        else:
+        # Map subproduct to Odoo model
+        model_map = {
+            "crm": "crm.lead",
+            "sales": "sale.order",
+            "inventory": "stock.inventory",
+            "Todo": "project.task"
+        }
+        model = model_map.get(subproduct)
+        if not model:
             return {"error": "Unsupported Odoo subproduct"}
 
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        # 1. Authenticate to get uid
+        auth_url = f"{base_url}/jsonrpc"
+        auth_payload = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "common",
+                "method": "login",
+                "args": [db, username, password]
+            },
+            "id": 1
+        }
+        auth_resp = requests.post(auth_url, json=auth_payload, timeout=10)
+        auth_data = auth_resp.json()
+        uid = auth_data.get("result")
+        if not uid:
+            return {"error": "Odoo authentication failed", "details": auth_data}
 
-        # Simple GET request to Odoo endpoint (assuming Odoo REST API module installed)
-        url = f"{base_url}{endpoint}"
-        resp = requests.get(url, auth=(username, password), headers=headers, timeout=10)
-
+        # 2. Call object.execute_kw to fetch records with domain
+        if domain is None:
+            domain = []
+        object_payload = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute_kw",
+                "args": [
+                    db,
+                    uid,
+                    password,
+                    model,
+                    "search_read",
+                    domain,  # domain filter
+                    {}  # fetch all
+                ]
+            },
+            "id": 2
+        }
+        object_resp = requests.post(auth_url, json=object_payload, timeout=15)
         try:
-            return resp.json()
+            result = object_resp.json()
+            if "result" in result:
+                return result["result"]
+            else:
+                return {"error": "Odoo data fetch failed", "details": result}
         except ValueError:
-            return {"error": "Invalid JSON from Odoo", "text": resp.text}
+            return {"error": "Invalid JSON from Odoo", "text": object_resp.text}
 
     except Exception as e:
         return {"error": str(e)}
@@ -364,16 +400,48 @@ def chat():
 
     # ---------- Odoo ----------
     elif datasource.lower() == "odoo":
-        odoo_data = fetch_odoo(config, connector_info["subproduct"])
-        if isinstance(odoo_data, list) and len(odoo_data) > 0:
-            odoo_text = "\n".join([
-                ", ".join([f"{k}: {v}" for k, v in item.items()])
-                for item in odoo_data[:20]  # limit to first 20 records
-            ])
-            odoo_text = odoo_text[:2000]
-            enriched_message = f"{user_message}\n\nReference Data from Odoo ({connector_info['subproduct']}):\n{odoo_text}"
-        elif isinstance(odoo_data, dict) and "error" in odoo_data:
-            enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
+        # For CRM, fetch the entire pipeline (all crm.lead records)
+        if connector_info["subproduct"] == "crm":
+            odoo_data = fetch_odoo(config, "crm", domain=[])
+            if isinstance(odoo_data, list) and len(odoo_data) > 0:
+                # Show as much as fits in prompt (truncate for safety)
+                odoo_text = "\n".join([
+                    ", ".join([f"{k}: {v}" for k, v in item.items()])
+                    for item in odoo_data[:40]  # show more pipeline records
+                ])
+                odoo_text = odoo_text[:3500]
+                enriched_message = f"{user_message}\n\nReference Data: Odoo CRM Pipeline (all stages):\n{odoo_text}"
+            elif isinstance(odoo_data, dict) and "error" in odoo_data:
+                enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
+        else:
+            # For other subproducts, use advanced querying
+            domain = []
+            try:
+                filter_prompt = (
+                    "Given the following user request, generate an Odoo domain filter (Python list of lists) "
+                    f"for the model '{connector_info['subproduct']}'. Only output the Python list, nothing else.\n"
+                    f"User request: {user_message}"
+                )
+                filter_client = genai.Client(api_key=gemini_api_key)
+                filter_response = filter_client.models.generate_content(model=gemini_model, contents=filter_prompt)
+                filter_text = getattr(filter_response, "text", None) or (filter_response.get("content") if isinstance(filter_response, dict) else str(filter_response))
+                import ast
+                domain = ast.literal_eval(filter_text.strip())
+                if not isinstance(domain, list):
+                    domain = []
+            except Exception as e:
+                domain = []
+
+            odoo_data = fetch_odoo(config, connector_info["subproduct"], domain=domain)
+            if isinstance(odoo_data, list) and len(odoo_data) > 0:
+                odoo_text = "\n".join([
+                    ", ".join([f"{k}: {v}" for k, v in item.items()])
+                    for item in odoo_data[:20]
+                ])
+                odoo_text = odoo_text[:2000]
+                enriched_message = f"{user_message}\n\nReference Data from Odoo ({connector_info['subproduct']}):\n{odoo_text}"
+            elif isinstance(odoo_data, dict) and "error" in odoo_data:
+                enriched_message = f"{user_message}\n\n(Odoo fetch error: {odoo_data['error']})"
 
     # ---------- Freshdesk ----------
     elif datasource.lower() == "freshdesk":
@@ -435,7 +503,7 @@ def save_chatbot():
     username = data.get("username")
     chatbot_name = data.get("chatbot_name")
     gemini_api_key = data.get("gemini_api_key")
-    gemini_model = data.get("gemini_model","gemini-1.5-flash")
+    gemini_model = data.get("gemini_model","gemini-2.0-flash")
     connector_id = data.get("connector_id")
     extra_config = json.dumps(data.get("extra_config",{}))
     if not all([chatbot_id, username, chatbot_name, gemini_api_key, connector_id]):

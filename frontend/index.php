@@ -2,8 +2,8 @@
 require "auth.php";
 check_login();
 // $backendUrl = "http://localhost:8080";
-// $backendUrl = getenv('BACKEND_URL') ?: "http://localhost:5000";
-$backendUrl = "https://chatbot-sb0u.onrender.com";
+$backendUrl = getenv('BACKEND_URL') ?: "http://localhost:5000";
+// $backendUrl = "https://chatbot-sb0u.onrender.com";
 $username = $_SESSION['username'];
 ?>
 <!DOCTYPE html>
@@ -122,6 +122,9 @@ $(function() {
               <td>${bot.chatbot_name}</td>
               <td>${bot.connector_id}</td>
               <td class="text-end">
+                <button class="btn btn-sm btn-secondary test-connector" data-id="${bot.connector_id}">
+                  <i class="bi bi-play-circle"></i> Test
+                </button>
                 <button class="btn btn-sm btn-primary select-connector" data-id="${bot.connector_id}">
                   <i class="bi bi-check-circle"></i> Use
                 </button>
@@ -134,6 +137,18 @@ $(function() {
         });
       });
   }
+
+  // Test connector from table (attach only once, outside loader)
+  $(document).off("click", ".test-connector").on("click", ".test-connector", function(){
+    let connectorId = $(this).data("id");
+    $.get(backend+"/test_connection/"+connectorId)
+      .done(function(res){
+        alert("Connection result: "+JSON.stringify(res).substring(0,200));
+      })
+      .fail(function(){
+        alert("Failed to test connection.");
+      });
+  });
   loadSavedConnectors();
 
 
@@ -150,7 +165,20 @@ $(function() {
   // Delete saved connector
   $(document).on("click", ".delete-connector", function(){
     let connectorId = $(this).data("id");
-    alert("Delete for connector " + connectorId + " is not implemented yet.");
+    let chatbotId = "bot-" + connectorId;
+    if(confirm("Are you sure you want to delete this connector and its chatbot?")) {
+      $.ajax({
+        url: backend + "/delete_chatbot/" + chatbotId,
+        type: "DELETE",
+        success: function(res) {
+          alert("Deleted successfully!");
+          loadSavedConnectors();
+        },
+        error: function(xhr) {
+          alert("Failed to delete: " + (xhr.responseJSON?.error || xhr.statusText));
+        }
+      });
+    }
   });
 
   // 4️⃣ Save connector and chatbot
@@ -207,8 +235,9 @@ $(function() {
       .done(function(res){ alert("Connection result: "+JSON.stringify(res).substring(0,200)); });
   });
 
-  // 6️⃣ Chat functionality
-  $("#btnSend").click(function(){
+
+  // Chat send function (for button and enter key)
+  function sendChatMessage() {
     let msg = $("#message").val().trim();
     if(!msg) return alert("Enter a message!");
     if(!currentChatbotId) return alert("Save connector first!");
@@ -216,19 +245,49 @@ $(function() {
     $("#chat-box").append('<div class="msg-user">You: '+msg+'</div>');
     $("#message").val("");
 
+    // Add processing animation
+    let processingId = "processing-" + Date.now();
+    $("#chat-box").append('<div class="msg-bot" id="'+processingId+'">Bot: <span class="dots">...</span></div>');
+    $("#chat-box").scrollTop($("#chat-box")[0].scrollHeight);
+
+    // Animate the dots
+    let dotCount = 0;
+    let dotInterval = setInterval(function() {
+      dotCount = (dotCount + 1) % 4;
+      let dots = Array(dotCount + 1).join('.') || '.';
+      $("#"+processingId+" .dots").text(dots);
+    }, 400);
+
     $.ajax({
       url: backend+"/chat",
       type:"POST",
       contentType:"application/json",
       data: JSON.stringify({ chatbot_id: currentChatbotId, message: msg }),
       success:function(res){
-        $("#chat-box").append('<div class="msg-bot">Bot: '+res.reply+'</div>');
+        clearInterval(dotInterval);
+        $("#"+processingId).replaceWith('<div class="msg-bot">Bot: '+res.reply+'</div>');
         $("#chat-box").scrollTop($("#chat-box")[0].scrollHeight);
       },
       error:function(){
-        $("#chat-box").append('<div class="msg-bot text-danger">Error connecting to bot</div>');
+        clearInterval(dotInterval);
+        $("#"+processingId).replaceWith('<div class="msg-bot text-danger">Error connecting to bot</div>');
       }
     });
+  }
+
+  $("#btnSend").click(sendChatMessage);
+
+  // Send on Enter key in chat input
+  $("#message").on("keydown", function(e) {
+    if(e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+
+  // Clear chat functionality
+  $("#btnClear").click(function(){
+    $("#chat-box").empty();
   });
 
 });
